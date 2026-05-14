@@ -1,0 +1,495 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+#game-wrap {
+  font-family: var(--font-mono, monospace);
+  background: #0a0a1a;
+  border-radius: var(--border-radius-lg);
+  overflow: hidden;
+  width: 100%;
+  user-select: none;
+}
+#hud {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px; background: #0d0d22;
+  border-bottom: 1px solid #1a1a3a;
+  flex-wrap: wrap; gap: 6px;
+}
+#hud span { color: #7af; font-size: 12px; font-weight: 500; }
+#hud .val { color: #fa0; font-size: 15px; font-weight: 500; }
+#canvas-wrap { position: relative; }
+canvas { display: block; width: 100%; }
+#input-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; background: #0d0d22;
+  border-top: 1px solid #1a1a3a;
+}
+#type-input {
+  flex: 1; background: #12122a; border: 1.5px solid #2a2a5a;
+  color: #eef; font-family: var(--font-mono); font-size: 18px;
+  padding: 8px 14px; border-radius: 8px; outline: none;
+  letter-spacing: 2px;
+}
+#type-input:focus { border-color: #4af; }
+#type-input.correct { border-color: #4f4; background: #0a1a0a; }
+#type-input.wrong   { border-color: #f44; background: #1a0a0a; }
+#hint-bar {
+  padding: 6px 16px; background: #090916;
+  font-size: 12px; color: #556; min-height: 26px;
+  display: flex; align-items: center; gap: 6px;
+}
+#overlay {
+  position: absolute; inset: 0;
+  background: rgba(5,5,20,0.93);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px;
+  padding: 20px;
+}
+#overlay h2 { color: #7af; font-size: 22px; font-weight: 500; }
+#overlay p  { color: #aab; font-size: 14px; text-align: center; line-height: 1.7; }
+#overlay .big { color: #fa0; font-size: 34px; font-weight: 500; }
+#start-btn {
+  background: #1a2a5a; color: #7af; border: 1px solid #3a5aaa;
+  padding: 10px 32px; border-radius: 8px; font-size: 15px;
+  cursor: pointer; font-family: var(--font-mono);
+}
+#start-btn:hover { background: #2a3a7a; }
+#miss-bar { display: flex; gap: 3px; flex-wrap: wrap; max-width: 320px; }
+</style>
+
+<div id="game-wrap">
+  <div id="hud">
+    <div><span>SCORE </span><span class="val" id="score">0</span></div>
+    <div><span>LEVEL </span><span class="val" id="level">1</span></div>
+    <div><span>문제 </span><span class="val" id="qcount">0</span><span>/20</span></div>
+    <div id="miss-bar"></div>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="c" height="430"></canvas>
+    <div id="overlay">
+      <h2>🚀 불규칙동사 인베이더</h2>
+      <p>외계인이 <strong style="color:#fa0">동사 원형 + 한글 뜻</strong>을 들고 내려옵니다.<br>
+         <strong style="color:#7af">과거분사형을 타이핑</strong>하면 자동 격추!</p>
+      <p style="color:#7af;font-size:12px;">레벨 1: 목숨 15개 · 20문제<br>레벨 오를수록 목숨 줄고 속도 ↑</p>
+      <p style="color:#7af;font-size:12px;">A-A-A ×1점 &nbsp;|&nbsp; A-B-A/B ×2점 &nbsp;|&nbsp; A-B-C ×3점</p>
+      <button id="start-btn">게임 시작</button>
+    </div>
+  </div>
+  <div id="hint-bar"><span id="hint-text" style="color:#556">타이핑하면 자동 격추!</span></div>
+  <div id="input-bar">
+    <input id="type-input" type="text" placeholder="과거분사형 타이핑..." autocomplete="off" autocorrect="off" spellcheck="false" disabled />
+  </div>
+</div>
+
+<script>
+const VERBS = {
+  AAA: [
+    {base:"cost",  pp:"cost",       past:"cost",       meaning:"비용이 들다"},
+    {base:"cut",   pp:"cut",        past:"cut",        meaning:"자르다"},
+    {base:"hit",   pp:"hit",        past:"hit",        meaning:"치다"},
+    {base:"hurt",  pp:"hurt",       past:"hurt",       meaning:"아프다"},
+    {base:"let",   pp:"let",        past:"let",        meaning:"하게 하다"},
+    {base:"put",   pp:"put",        past:"put",        meaning:"놓다"},
+    {base:"quit",  pp:"quit",       past:"quit",       meaning:"그만두다"},
+    {base:"read",  pp:"read",       past:"read",       meaning:"읽다"},
+    {base:"set",   pp:"set",        past:"set",        meaning:"(해가)지다"},
+    {base:"bet",   pp:"bet",        past:"bet",        meaning:"내기를 걸다"},
+    {base:"spread",pp:"spread",     past:"spread",     meaning:"펼치다"},
+  ],
+  ABA: [
+    {base:"become",pp:"become",     past:"became",     meaning:"되다"},
+    {base:"come",  pp:"come",       past:"came",       meaning:"오다"},
+    {base:"run",   pp:"run",        past:"ran",        meaning:"달리다"},
+  ],
+  ABB: [
+    {base:"bring", pp:"brought",    past:"brought",    meaning:"가져오다"},
+    {base:"build", pp:"built",      past:"built",      meaning:"짓다"},
+    {base:"buy",   pp:"bought",     past:"bought",     meaning:"사다"},
+    {base:"catch", pp:"caught",     past:"caught",     meaning:"붙잡다"},
+    {base:"feel",  pp:"felt",       past:"felt",       meaning:"느끼다"},
+    {base:"find",  pp:"found",      past:"found",      meaning:"발견하다"},
+    {base:"get",   pp:"got",        past:"got",        meaning:"얻다"},
+    {base:"have",  pp:"had",        past:"had",        meaning:"갖다"},
+    {base:"hear",  pp:"heard",      past:"heard",      meaning:"듣다"},
+    {base:"keep",  pp:"kept",       past:"kept",       meaning:"지키다"},
+    {base:"leave", pp:"left",       past:"left",       meaning:"떠나다"},
+    {base:"lose",  pp:"lost",       past:"lost",       meaning:"잃다"},
+    {base:"make",  pp:"made",       past:"made",       meaning:"만들다"},
+    {base:"meet",  pp:"met",        past:"met",        meaning:"만나다"},
+    {base:"pay",   pp:"paid",       past:"paid",       meaning:"지불하다"},
+    {base:"say",   pp:"said",       past:"said",       meaning:"말하다"},
+    {base:"sell",  pp:"sold",       past:"sold",       meaning:"팔다"},
+    {base:"send",  pp:"sent",       past:"sent",       meaning:"보내다"},
+    {base:"sit",   pp:"sat",        past:"sat",        meaning:"앉다"},
+    {base:"sleep", pp:"slept",      past:"slept",      meaning:"잠자다"},
+    {base:"spend", pp:"spent",      past:"spent",      meaning:"쓰다"},
+    {base:"stand", pp:"stood",      past:"stood",      meaning:"서다"},
+    {base:"teach", pp:"taught",     past:"taught",     meaning:"가르치다"},
+    {base:"tell",  pp:"told",       past:"told",       meaning:"말하다"},
+    {base:"think", pp:"thought",    past:"thought",    meaning:"생각하다"},
+    {base:"win",   pp:"won",        past:"won",        meaning:"이기다"},
+    {base:"understand",pp:"understood",past:"understood",meaning:"이해하다"},
+  ],
+  ABC: [
+    {base:"be",    pp:"been",       past:"was/were",   meaning:"이다"},
+    {base:"begin", pp:"begun",      past:"began",      meaning:"시작하다"},
+    {base:"blow",  pp:"blown",      past:"blew",       meaning:"불다"},
+    {base:"break", pp:"broken",     past:"broke",      meaning:"부수다"},
+    {base:"choose",pp:"chosen",     past:"chose",      meaning:"선택하다"},
+    {base:"do",    pp:"done",       past:"did",        meaning:"하다"},
+    {base:"draw",  pp:"drawn",      past:"drew",       meaning:"그리다"},
+    {base:"drink", pp:"drunk",      past:"drank",      meaning:"마시다"},
+    {base:"drive", pp:"driven",     past:"drove",      meaning:"운전하다"},
+    {base:"eat",   pp:"eaten",      past:"ate",        meaning:"먹다"},
+    {base:"fall",  pp:"fallen",     past:"fell",       meaning:"떨어지다"},
+    {base:"fly",   pp:"flown",      past:"flew",       meaning:"날다"},
+    {base:"forget",pp:"forgotten",  past:"forgot",     meaning:"잊다"},
+    {base:"give",  pp:"given",      past:"gave",       meaning:"주다"},
+    {base:"go",    pp:"gone",       past:"went",       meaning:"가다"},
+    {base:"grow",  pp:"grown",      past:"grew",       meaning:"자라다"},
+    {base:"know",  pp:"known",      past:"knew",       meaning:"알다"},
+    {base:"ride",  pp:"ridden",     past:"rode",       meaning:"타다"},
+    {base:"ring",  pp:"rung",       past:"rang",       meaning:"울리다"},
+    {base:"see",   pp:"seen",       past:"saw",        meaning:"보다"},
+    {base:"sing",  pp:"sung",       past:"sang",       meaning:"노래하다"},
+    {base:"speak", pp:"spoken",     past:"spoke",      meaning:"말하다"},
+    {base:"steal", pp:"stolen",     past:"stole",      meaning:"훔치다"},
+    {base:"swim",  pp:"swum",       past:"swam",       meaning:"수영하다"},
+    {base:"take",  pp:"taken",      past:"took",       meaning:"(버스를)타다"},
+    {base:"wear",  pp:"worn",       past:"wore",       meaning:"입다"},
+    {base:"write", pp:"written",    past:"wrote",      meaning:"쓰다"},
+    {base:"throw", pp:"thrown",     past:"threw",      meaning:"던지다"},
+    {base:"wake",  pp:"woken",      past:"woke",       meaning:"일어나다"},
+    {base:"freeze",pp:"frozen",     past:"froze",      meaning:"얼다"},
+    {base:"bite",  pp:"bitten",     past:"bit",        meaning:"물다"},
+    {base:"hide",  pp:"hidden",     past:"hid",        meaning:"숨다"},
+    {base:"show",  pp:"shown",      past:"showed",     meaning:"보여주다"},
+  ]
+};
+
+const TYPE_MULT = {AAA:1, ABA:2, ABB:2, ABC:3};
+const TYPE_COL  = {AAA:'#4af', ABA:'#af4', ABB:'#fa4', ABC:'#f46'};
+const GROUPS    = ['AAA','ABA','ABB','ABC'];
+const GOAL      = 20;
+
+function maxLives(lv){ return Math.max(3, 15 - (lv-1)*2); }
+// 속도: 이전보다 약 2배 빠르게, 레벨당 점진 증가
+function alienSpeed(lv){ return 0.55 + lv*0.18 + Math.random()*0.15; }
+// 스폰 간격: 이전보다 빠르게
+function spawnRate(lv){ return Math.max(70, 200 - lv*18); }
+function maxAliens(lv){ return Math.min(2 + Math.floor(lv/2), 5); }
+
+function shuffle(a){let b=[...a];for(let i=b.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;}
+
+let groupPools={}, groupIdx={}, groupRound=0;
+function resetPools(){
+  GROUPS.forEach(g=>{groupPools[g]=shuffle([...VERBS[g]]);groupIdx[g]=0;});
+  groupRound=0;
+}
+function nextVerb(){
+  const g=GROUPS[groupRound%4]; groupRound++;
+  if(groupIdx[g]>=groupPools[g].length){groupPools[g]=shuffle([...VERBS[g]]);groupIdx[g]=0;}
+  const v=groupPools[g][groupIdx[g]++];
+  return {...v, type:g};
+}
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const W=680, H=430;
+canvas.width=W; canvas.height=H;
+
+let aliens=[], bullets=[], particles=[], explosions=[], popups=[];
+let score=0, lives=15, maxLivesNow=15, level=1;
+let solved=0, gameOver=false, started=false;
+let frame=0, spawnTimer=0, totalSpawned=0;
+let playerX=W/2;
+const PLAYER_Y=H-36;
+
+function spawnAlien(){
+  if(aliens.length>=maxAliens(level)) return;
+  if(totalSpawned>=GOAL) return;
+  const v=nextVerb();
+  const x=80+Math.random()*(W-160);
+  aliens.push({v,x,y:-48,vy:alienSpeed(level),
+    phase:Math.random()*Math.PI*2,col:TYPE_COL[v.type],
+    wobble:(Math.random()-0.5)*0.5,hitFlash:0});
+  totalSpawned++;
+}
+
+function alienWidth(a){
+  ctx.font='bold 13px monospace';
+  const bw=ctx.measureText(a.v.base).width;
+  ctx.font='11px sans-serif';
+  const mw=ctx.measureText(a.v.meaning).width;
+  return Math.max(bw,mw)+36;
+}
+
+function drawBg(){
+  ctx.fillStyle='#0a0a1a'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#fff';
+  for(let i=0;i<90;i++){
+    const sx=(i*137+frame*0.07)%W, sy=(i*91+frame*(0.05+i%4*0.025))%H;
+    ctx.globalAlpha=0.13+Math.sin(frame*0.04+i)*0.09;
+    ctx.beginPath(); ctx.arc(sx,sy,0.4+(i%5)/12,0,Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  const g=ctx.createLinearGradient(0,H-8,0,H);
+  g.addColorStop(0,'rgba(60,200,255,0.25)'); g.addColorStop(1,'rgba(60,200,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,H-8,W,8);
+}
+
+function drawPlayer(){
+  ctx.save(); ctx.translate(playerX,PLAYER_Y);
+  ctx.fillStyle='#3af';
+  ctx.beginPath(); ctx.moveTo(0,-18); ctx.lineTo(-14,8); ctx.lineTo(14,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#9ef'; ctx.beginPath(); ctx.ellipse(0,-6,5,7,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#28a';
+  ctx.beginPath(); ctx.moveTo(-14,8); ctx.lineTo(-22,14); ctx.lineTo(-6,8); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(14,8); ctx.lineTo(22,14); ctx.lineTo(6,8); ctx.closePath(); ctx.fill();
+  const eg=ctx.createLinearGradient(0,8,0,24);
+  eg.addColorStop(0,'rgba(80,180,255,0.8)'); eg.addColorStop(1,'rgba(80,180,255,0)');
+  ctx.fillStyle=eg; ctx.beginPath(); ctx.ellipse(0,14,5,10,0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawAlien(a){
+  ctx.save();
+  const dy=Math.sin(a.phase)*5;
+  ctx.translate(a.x,a.y+dy);
+  const col=a.hitFlash>0?'#fff':a.col;
+  const tw=alienWidth(a);
+  ctx.fillStyle=col+'22'; ctx.strokeStyle=col; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.roundRect(-tw/2,-26,tw,52,9); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=col;
+  ctx.beginPath(); ctx.ellipse(-8,-10,3,4,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( 8,-10,3,4,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=col; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-6,-26); ctx.lineTo(-10,-34); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 6,-26); ctx.lineTo( 10,-34); ctx.stroke();
+  ctx.fillStyle=col;
+  ctx.beginPath(); ctx.arc(-10,-35,2.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc( 10,-35,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 13px monospace';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(a.v.base,0,2);
+  ctx.font='11px sans-serif'; ctx.fillStyle=col;
+  ctx.fillText(a.v.meaning,0,17);
+  ctx.font='9px monospace'; ctx.fillStyle=col+'bb';
+  ctx.fillText(a.v.type,0,-14);
+  ctx.restore();
+}
+
+function drawBullet(b){
+  ctx.save(); ctx.translate(b.x,b.y);
+  const g=ctx.createLinearGradient(0,-14,0,0);
+  g.addColorStop(0,'rgba(80,220,255,0)'); g.addColorStop(1,'#4ef');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(0,-7,2.5,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,0,2.5,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function explode(x,y,col){
+  for(let i=0;i<20;i++){
+    const a=Math.random()*Math.PI*2, sp=1+Math.random()*4;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,r:1+Math.random()*3,col});
+  }
+  explosions.push({x,y,r:0,col,life:1});
+}
+
+function drawFx(){
+  for(const e of explosions){
+    ctx.globalAlpha=e.life*0.45; ctx.strokeStyle=e.col; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(e.x,e.y,e.r,0,Math.PI*2); ctx.stroke(); ctx.globalAlpha=1;
+  }
+  for(const p of particles){
+    ctx.globalAlpha=p.life; ctx.fillStyle=p.col;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+  }
+}
+
+function drawPopups(){
+  for(const p of popups){
+    ctx.globalAlpha=p.life; ctx.fillStyle=p.col;
+    ctx.font='bold 14px monospace'; ctx.textAlign='center';
+    ctx.fillText(p.txt,p.x,p.y); ctx.globalAlpha=1;
+  }
+}
+
+const input=document.getElementById('type-input');
+const hintEl=document.getElementById('hint-text');
+
+function colorInput(typed){
+  let best=null, bestMatch=0;
+  for(const a of aliens){
+    const pp=a.v.pp;
+    if(typed===pp){best=a;break;}
+    let m=0;
+    for(let i=0;i<typed.length&&i<pp.length;i++){if(typed[i]===pp[i])m++;else break;}
+    if(m>bestMatch){bestMatch=m;best=a;}
+  }
+  if(!typed){
+    input.className=''; input.style.color='#eef';
+    hintEl.innerHTML='<span style="color:#556">타이핑하면 자동 격추!</span>';
+    return null;
+  }
+  if(best&&typed===best.v.pp){input.className='correct';return best;}
+  if(best&&best.v.pp.startsWith(typed)){
+    input.className=''; input.style.color='#4af';
+    hintEl.innerHTML=`<span style="color:#4af">${best.v.base}</span><span style="color:#555"> (${best.v.meaning}) → 과거: ${best.v.past} → 과거분사: </span><span style="color:#4f4">${best.v.pp}</span>`;
+    return null;
+  }
+  input.className='wrong'; input.style.color='#f88';
+  hintEl.innerHTML='<span style="color:#f64">일치하는 동사 없음 — 다시 시도!</span>';
+  return null;
+}
+
+input.addEventListener('input',()=>{
+  if(!started||gameOver) return;
+  const typed=input.value.trim().toLowerCase();
+  const hit=colorInput(typed);
+  if(hit){
+    bullets.push({x:playerX,y:PLAYER_Y-20,vy:-14,target:hit});
+    input.value=''; input.className=''; input.style.color='#eef';
+    hintEl.innerHTML='<span style="color:#4f4">💥 정확!</span>';
+    setTimeout(()=>{hintEl.innerHTML='<span style="color:#556">타이핑하면 자동 격추!</span>';},700);
+  }
+});
+
+function updateHud(){
+  document.getElementById('score').textContent=score;
+  document.getElementById('level').textContent=level;
+  document.getElementById('qcount').textContent=solved;
+  const el=document.getElementById('miss-bar'); el.innerHTML='';
+  for(let i=0;i<maxLivesNow;i++){
+    const s=document.createElement('span');
+    s.textContent=i<lives?'♥':'♡';
+    s.style.cssText=`font-size:11px;color:${i<lives?'#f44':'#333'};`;
+    el.appendChild(s);
+  }
+}
+
+let raf;
+function gameLoop(){
+  frame++; spawnTimer++;
+  if(spawnTimer>spawnRate(level)){spawnAlien();spawnTimer=0;}
+
+  for(let i=aliens.length-1;i>=0;i--){
+    const a=aliens[i];
+    a.y+=a.vy; a.phase+=0.03;
+    a.x+=Math.sin(frame*0.02+a.phase)*a.wobble;
+    if(a.hitFlash>0) a.hitFlash--;
+    if(a.y>PLAYER_Y-5){
+      explode(a.x,a.y,a.col); aliens.splice(i,1);
+      lives--; updateHud();
+      if(lives<=0){endGame();return;}
+    }
+  }
+
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];
+    if(b.target){b.x+=(b.target.x-b.x)*0.12;}
+    b.y+=b.vy;
+    if(b.y<-20){bullets.splice(i,1);continue;}
+    const ai=aliens.indexOf(b.target);
+    if(ai>=0&&b.y<=b.target.y+28&&b.y>=b.target.y-28){
+      const a=aliens[ai];
+      explode(a.x,a.y,a.col);
+      const pts=100*TYPE_MULT[a.v.type];
+      score+=pts; solved++;
+      popups.push({x:a.x,y:a.y-20,txt:'+'+pts,col:a.col,life:1,vy:-1.5});
+      aliens.splice(ai,1); bullets.splice(i,1);
+      updateHud();
+      if(solved>=GOAL && aliens.length===0 && totalSpawned>=GOAL){
+        stageClear(); return;
+      }
+    }
+  }
+
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.life-=0.03;
+    if(p.life<=0)particles.splice(i,1);
+  }
+  for(let i=explosions.length-1;i>=0;i--){
+    const e=explosions[i];e.r+=3.5;e.life-=0.07;
+    if(e.life<=0)explosions.splice(i,1);
+  }
+  for(let i=popups.length-1;i>=0;i--){
+    const p=popups[i];p.y+=p.vy;p.life-=0.025;
+    if(p.life<=0)popups.splice(i,1);
+  }
+
+  drawBg(); drawFx();
+  for(const a of aliens) drawAlien(a);
+  for(const b of bullets) drawBullet(b);
+  drawPlayer(); drawPopups();
+  raf=requestAnimationFrame(gameLoop);
+}
+
+function stageClear(){
+  gameOver=true; started=false;
+  cancelAnimationFrame(raf); input.disabled=true;
+  const missed=maxLivesNow-lives;
+  const ov=document.getElementById('overlay');
+  ov.innerHTML=`
+    <h2>🎉 레벨 ${level} 클리어!</h2>
+    <p class="big">${score} 점</p>
+    <p>20문제 완료 &nbsp;|&nbsp; 놓친 동사: <span style="color:#f64">${missed}개</span></p>
+    <p style="color:#7af;font-size:13px">다음 레벨: 목숨 ${Math.max(3,maxLivesNow-2)}개 · 속도 ↑</p>
+    <button id="start-btn">레벨 ${level+1} 도전!</button>
+    <button id="restart-btn" style="background:#0a1a2a;color:#556;border:1px solid #2a3a5a;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-family:var(--font-mono)">처음부터 다시</button>
+  `;
+  ov.style.display='flex';
+  document.getElementById('start-btn').onclick=()=>nextLevel();
+  document.getElementById('restart-btn').onclick=()=>startGame(1);
+}
+
+function endGame(){
+  gameOver=true; started=false;
+  cancelAnimationFrame(raf); input.disabled=true;
+  const ov=document.getElementById('overlay');
+  ov.innerHTML=`
+    <h2>💥 게임 오버</h2>
+    <p class="big">${score} 점</p>
+    <p>레벨 ${level} &nbsp;|&nbsp; ${solved}/${GOAL}문제 완료</p>
+    <p style="color:#7af;font-size:13px">다시 도전해보세요!</p>
+    <button id="start-btn">처음부터 다시</button>
+  `;
+  ov.style.display='flex';
+  document.getElementById('start-btn').onclick=()=>startGame(1);
+}
+
+function nextLevel(){ level++; initLevel(); }
+
+function initLevel(){
+  aliens=[]; bullets=[]; particles=[]; explosions=[]; popups=[];
+  solved=0; totalSpawned=0; frame=0; spawnTimer=0;
+  maxLivesNow=maxLives(level); lives=maxLivesNow;
+  gameOver=false; started=true;
+  resetPools();
+  document.getElementById('overlay').style.display='none';
+  input.disabled=false; input.value=''; input.className='';
+  input.style.color='#eef'; input.focus();
+  updateHud();
+  hintEl.innerHTML='<span style="color:#556">타이핑하면 자동 격추!</span>';
+  cancelAnimationFrame(raf);
+  gameLoop();
+}
+
+function startGame(lv){ level=lv||1; score=0; initLevel(); }
+
+canvas.addEventListener('mousemove',(e)=>{
+  const r=canvas.getBoundingClientRect();
+  playerX=Math.max(20,Math.min(W-20,(e.clientX-r.left)*(W/r.width)));
+});
+canvas.addEventListener('touchmove',(e)=>{
+  e.preventDefault();
+  const r=canvas.getBoundingClientRect();
+  playerX=Math.max(20,Math.min(W-20,(e.touches[0].clientX-r.left)*(W/r.width)));
+},{passive:false});
+
+document.getElementById('start-btn').onclick=()=>startGame(1);
+maxLivesNow=maxLives(1); lives=maxLivesNow;
+updateHud();
+ctx.fillStyle='#0a0a1a'; ctx.fillRect(0,0,W,H);
+drawPlayer();
+</script>
